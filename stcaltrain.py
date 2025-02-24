@@ -272,7 +272,7 @@ else:
             valid_nb_trains.append(train_id)
 
     # Southbound trains (Millbrae to Palo Alto) - Going to Work
-    col1.subheader("Going to Work (Millbrae → Palo Alto)")
+    col1.subheader("Work 💪(M → P)")
     sb_trains = caltrain_data[caltrain_data["id"].isin(valid_sb_trains)]
     sb_trains = sb_trains[sb_trains["stopname"] == "Millbrae"]
     sb_trains = sb_trains.sort_values(by=["ETA"])
@@ -283,7 +283,7 @@ else:
         col1.dataframe(clean_up_df(sb_trains), use_container_width=True)
 
     # Northbound Trains (Palo Alto to Millbrae) - Going Home
-    col1.subheader("Going Home (Palo Alto → Millbrae)")
+    col1.subheader("Home 😄(P → M)")
     nb_trains = caltrain_data[caltrain_data["id"].isin(valid_nb_trains)]
     nb_trains = nb_trains[nb_trains["stopname"] == "Palo Alto"]
     nb_trains = nb_trains.sort_values(by=["ETA"])

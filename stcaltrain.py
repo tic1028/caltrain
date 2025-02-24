@@ -172,15 +172,10 @@ col1, col2 = st.columns([2, 1])
 
 col1.markdown(
     """
-    Track when the next trains leave from your station and where they are right now. Choose a destination to filter for trains that stop there.
+    Track when the next trains leave from your station and where they are right now.
     """
 )
 
-col1, col2 = st.columns([2, 1])
-chosen_station = col1.selectbox("Choose Origin Station", caltrain_stations["stopname"], index=10)
-chosen_destination = col1.selectbox(
-    "Choose Destination Station", ["--"] + caltrain_stations["stopname"].tolist(), index=0
-)
 api_working = True if type(caltrain_data) == pd.DataFrame else False
 scheduled = False
 
@@ -213,46 +208,31 @@ if display == "Scheduled":
         col1.error(
             "❌ Caltrain Live Map API is currently down. Pulling the current schedule from the Caltrain website instead..."
         )
-    # If the chosen destination is before the chosen station, then the direction is southbound
-    if chosen_destination != "--" and chosen_destination != chosen_station:
-        if is_northbound(chosen_station, chosen_destination):
-            caltrain_data = get_schedule("northbound", chosen_station, chosen_destination)
-        else:
-            caltrain_data = get_schedule("southbound", chosen_station, chosen_destination)
 
-    else:
-        caltrain_data = pd.concat(
-            [
-                get_schedule("northbound", chosen_station, chosen_destination),
-                get_schedule("southbound", chosen_station, chosen_destination),
-            ]
-        )
+    # Get southbound trains (Millbrae to Palo Alto)
+    millbrae_to_palo = get_schedule("southbound", "Millbrae", "Palo Alto")
 
-    # Sort by ETA
-    caltrain_data = caltrain_data.sort_values(by=["ETA"])
-    caltrain_data_nb = caltrain_data.query("Direction == 'NB'").drop("Direction", axis=1)
-    caltrain_data_sb = (
-        caltrain_data.query("Direction == 'SB'").drop("Direction", axis=1).reset_index(drop=True)
-    )
-
-    # Reset the index to 1, 2, 3.
-    caltrain_data_nb.index = caltrain_data_nb.index + 1
-    caltrain_data_sb.index = caltrain_data_sb.index + 1
-
-    col1, col2 = st.columns([2, 1])
+    # Get northbound trains (Palo Alto to Millbrae)
+    palo_to_millbrae = get_schedule("northbound", "Palo Alto", "Millbrae")
 
     # Display the dataframes split by Train #, Scheduled Departure, Current Stop and the other columns
-    col1.subheader("Northbound Trains")
-    nb_data = caltrain_data_nb.T
-    nb_data.columns = nb_data.iloc[0]
-    nb_data = nb_data.drop(nb_data.index[0])
-    col1.dataframe(nb_data, use_container_width=True)
-
-    col1.subheader("Southbound Trains")
-    sb_data = caltrain_data_sb.T
+    # Going to Work section first
+    col1.subheader("Going to Work (Millbrae → Palo Alto)")
+    sb_data = millbrae_to_palo.drop("Direction", axis=1).reset_index(drop=True)
+    sb_data.index = sb_data.index + 1
+    sb_data = sb_data.T
     sb_data.columns = sb_data.iloc[0]
     sb_data = sb_data.drop(sb_data.index[0])
     col1.dataframe(sb_data, use_container_width=True)
+
+    # Going Home section second
+    col1.subheader("Going Home (Palo Alto → Millbrae)")
+    nb_data = palo_to_millbrae.drop("Direction", axis=1).reset_index(drop=True)
+    nb_data.index = nb_data.index + 1
+    nb_data = nb_data.T
+    nb_data.columns = nb_data.iloc[0]
+    nb_data = nb_data.drop(nb_data.index[0])
+    col1.dataframe(nb_data, use_container_width=True)
 
 else:
     col1.info("✅ Caltrain API is up and running")
@@ -265,46 +245,53 @@ else:
         .dt.strftime("%I:%M %p")
     )
 
-    # Filter for destinations
-    valid_destinations = [
-        "San Francisco",
-        "Tamien",
-        "San Jose Diridon",
-    ]
-    if chosen_destination != "--" and chosen_destination not in valid_destinations:
-        destinations = caltrain_data[caltrain_data["stopname"] == chosen_destination]["id"]
-        caltrain_data = caltrain_data[caltrain_data["id"].isin(destinations)]
 
-    # Remove NB or SB depending on the direction
-    if chosen_destination != "--" and chosen_destination != chosen_station:
-        if is_northbound(chosen_station, chosen_destination):
-            caltrain_data = caltrain_data.query("direction == 'NB'")
-        else:
-            caltrain_data = caltrain_data.query("direction == 'SB'")
+    # Function to check if a train passes through both stations
+    def train_passes_through(train_id, start_station, end_station, direction):
+        # Get all stops for this train
+        train_stops = caltrain_data[caltrain_data["id"] == train_id]["stopname"].unique()
 
-    # # Display the dataframes split by Train #, Scheduled Departure, Current Stop and the other columns
+        # Check if both stations are in the stop list
+        if start_station in train_stops and end_station in train_stops:
+            # Verify it's going in the right direction
+            train_direction = caltrain_data[caltrain_data["id"] == train_id]["direction"].iloc[0]
+            return train_direction == direction
+        return False
 
-    # Northbound Trains
-    col1.subheader("Northbound Trains")
-    nb_trains = caltrain_data.query("Direction == 'NB'").drop("Direction", axis=1)
+
+    # Find trains that go from Millbrae to Palo Alto (southbound)
+    valid_sb_trains = []
+    for train_id in caltrain_data["id"].unique():
+        if train_passes_through(train_id, "Millbrae", "Palo Alto", "SB"):
+            valid_sb_trains.append(train_id)
+
+    # Find trains that go from Palo Alto to Millbrae (northbound)
+    valid_nb_trains = []
+    for train_id in caltrain_data["id"].unique():
+        if train_passes_through(train_id, "Palo Alto", "Millbrae", "NB"):
+            valid_nb_trains.append(train_id)
+
+    # Southbound trains (Millbrae to Palo Alto) - Going to Work
+    col1.subheader("Going to Work (Millbrae → Palo Alto)")
+    sb_trains = caltrain_data[caltrain_data["id"].isin(valid_sb_trains)]
+    sb_trains = sb_trains[sb_trains["stopname"] == "Millbrae"]
+    sb_trains = sb_trains.sort_values(by=["ETA"])
+
+    if len(sb_trains) == 0:
+        col1.info("No trains")
+    else:
+        col1.dataframe(clean_up_df(sb_trains), use_container_width=True)
+
+    # Northbound Trains (Palo Alto to Millbrae) - Going Home
+    col1.subheader("Going Home (Palo Alto → Millbrae)")
+    nb_trains = caltrain_data[caltrain_data["id"].isin(valid_nb_trains)]
+    nb_trains = nb_trains[nb_trains["stopname"] == "Palo Alto"]
     nb_trains = nb_trains.sort_values(by=["ETA"])
-    nb_trains = nb_trains[nb_trains["stopname"] == chosen_station]
 
     if nb_trains.empty:
         col1.info("No trains")
     else:
         col1.dataframe(clean_up_df(nb_trains), use_container_width=True)
-
-    # Southbound trains
-    col1.subheader("Southbound Trains")
-    sb_data = caltrain_data.query("direction == 'SB'").drop("direction", axis=1)
-    sb_data = sb_data.sort_values(by=["ETA"])
-    sb_data = sb_data[sb_data["stopname"] == chosen_station]
-
-    if len(sb_data) == 0:
-        col1.info("No trains")
-    else:
-        col1.dataframe(clean_up_df(sb_data), use_container_width=True)
 
 if col1.button("Refresh Data"):
     st.experimental_rerun()
@@ -316,10 +303,10 @@ col1.markdown(
     """
 1. **Train Number** - The train ID. The first digit indicates the train type.
 2. **Train Type** - Local trains make all stops. Limited and Bullet make fewer.
-3. **Departure Time** - The scheduled departure time of the train from the **Origin** station.
-4. **ETA** - The estimated number of hours and minutes before the train arrives.
-5. **Distance to Station** - The distance from the train to the **Origin** station.
-6. **Stops Away** - The number of stops until the train reaches the **Origin** station.
+3. **Departure Time** - The scheduled departure time of the train from the origin station.
+4. **ETA** - The estimated number of minutes before the train arrives.
+5. **Distance to Station** - The distance from the train to the origin station.
+6. **Stops Away** - The number of stops until the train reaches the origin station.
 """
 )
 
@@ -329,6 +316,10 @@ col1.markdown(
 - This app pulls _real-time_ data from the [511 API](https://511.org/open-data). It was created to solve the issue of arriving at the Caltrain station while the train is behind schedule. This app will tell you when the next train is leaving, and about how long it will take to arrive at the station.
 
 - **Note:** If the caltrain API is down or there aren't any trains moving, then the app will pull the current schedule from the Caltrain website instead.
+
+- This app specifically shows:
+  - Going to Work: Trains from Millbrae to Palo Alto (formerly Southbound)
+  - Going Home: Trains from Palo Alto to Millbrae (formerly Northbound)
 """
 )
 
